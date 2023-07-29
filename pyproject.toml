@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cpwebapi"
+version = "0.0.1"
+dependencies = [
+    "requests",
+    "pycryptodome",
+    'importlib-metadata; python_version<"3.8"',
+]
