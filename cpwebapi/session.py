@@ -4,7 +4,8 @@ import dataclasses
 import functools
 import inspect
 import urllib3
-import logging
+import threading
+import time
 from urllib3 import exceptions
 from urllib import parse
 from typing import Any
@@ -36,10 +37,10 @@ class APIRequest:
     extra_headers: dict[str, str] = dataclasses.field(default=None)
 
 
-def request(method: str, endpoint: str):
+def request(method: str, endpoint: str) -> requests.Response:
     def decorator(func):
         @functools.wraps(func)
-        def wrapper(self, *args, **kwargs):
+        def wrapper(self, *args, **kwargs) -> requests.Response:
             # Bind the function arguments to the function signature.
             func_signature = inspect.signature(func).bind(self, *args, **kwargs)
             func_signature.apply_defaults()
@@ -48,11 +49,7 @@ def request(method: str, endpoint: str):
             request_data = func(self, *args, **kwargs)
             if not request_data:
                 request_data = APIRequest()
-            response = self.make_api_request(method, formatted_endpoint, request_data)
-            if not response.ok:
-                response.raise_for_status()
-            response_data = response.json()
-            return response_data
+            return self.make_api_request(method, formatted_endpoint, request_data)
 
         return wrapper
 
@@ -63,41 +60,41 @@ class APISession:
     # Session endpoints
 
     @request("POST", "tickle")
-    def tickle(self):
+    def tickle(self) -> requests.Response:
         """
         Tickle the session to keep it alive.
         """
         pass
 
     @request("POST", "logout")
-    def logout(self):
+    def logout(self) -> requests.Response:
         """
         Logout of the session.
         """
         pass
 
     @request("GET", "iserver/auth/status")
-    def auth_status(self):
+    def auth_status(self) -> requests.Response:
         """
         Get the authentication status for the current session.
         """
         pass
 
     @request("POST", "iserver/reauthenticate")
-    def reauthenticate(self):
+    def reauthenticate(self) -> requests.Response:
         """
         Reauthenticate the session.
         """
         pass
 
     @request("GET", "one/user")
-    def user_details(self):
+    def user_details(self) -> requests.Response:
         pass
 
     # Contract operations
 
     @request("GET", "trsrv/secdef")
-    def secdef_by_conid(self, conid_list: list[int]):
+    def secdef_by_conid(self, conid_list: list[int]) -> requests.Response:
         """
         Get security definitions by conid. This endpoint does not require a brokerage session.
         """
@@ -113,7 +110,7 @@ class APISession:
         asset_class: str,
         exchange: str = None,
         exchange_filter: str = None,
-    ):
+    ) -> requests.Response:
         """
         Returns the trading schedule for the requested symbol up to a month in advance.
         """
@@ -128,7 +125,7 @@ class APISession:
         return request_data
 
     @request("GET", "trsrv/futures")
-    def futures_by_symbol(self, symbol_list: list[str]):
+    def futures_by_symbol(self, symbol_list: list[str]) -> requests.Response:
         """
         Returns a list of non-expired future contracts for a given symbol.
         """
@@ -136,7 +133,7 @@ class APISession:
         return request_data
 
     @request("GET", "trsrv/stocks")
-    def stocks_by_symbol(self, symbol_list: list[str]):
+    def stocks_by_symbol(self, symbol_list: list[str]) -> requests.Response:
         """
         Get stocks by symbol. This endpoint does not require a brokerage session.
         """
@@ -144,7 +141,7 @@ class APISession:
         return request_data
 
     @request("GET", "iserver/contract/{conid}/info")
-    def contract_details(self, conid: int):
+    def contract_details(self, conid: int) -> requests.Response:
         """
         Get details for the specified contract identifier.
         """
@@ -153,7 +150,7 @@ class APISession:
     @request("POST", "iserver/secdef/search")
     def search_by_symbol_or_name(
         self, search_term: str, is_name: bool = True, asset_class: str = None
-    ):
+    ) -> requests.Response:
         """
         Search for a contract by symbol or name.
         """
@@ -165,7 +162,7 @@ class APISession:
     @request("GET", "iserver/secdef/strikes")
     def search_strikes(
         self, conid: int, asset_class: str, month: str, exchange: str = "SMART"
-    ):
+    ) -> requests.Response:
         """
         Get a list of strikes for the specified contract identifier. For available contract months and exchanges
         use the `search_by_symbol_or_name` endpoint.
@@ -191,7 +188,7 @@ class APISession:
         exchange: str = "SMART",
         strike: float = None,
         right: str = None,
-    ):
+    ) -> requests.Response:
         VALID_ASSET_CLASSES = ["FUT", "OPT", "WAR", "CASH", "CFD"]
         asset_class_upper = asset_class.upper()
         if asset_class_upper not in VALID_ASSET_CLASSES:
@@ -229,7 +226,7 @@ class APISession:
         algo_list: list[str] = None,
         add_algo_description: bool = False,
         add_algo_params: bool = False,
-    ):
+    ) -> requests.Response:
         """
         Get a list of supported algos for the specified contract identifier. Must be called a second time to get the full
         list of parameters for each algo.
@@ -244,7 +241,7 @@ class APISession:
         return request_data
 
     @request("POST", "iserver/contract/rules")
-    def contract_rules(self, conid: int, is_buy: bool = True):
+    def contract_rules(self, conid: int, is_buy: bool = True) -> requests.Response:
         """
         Get a list of rules for the specified contract identifier.
         """
@@ -252,7 +249,9 @@ class APISession:
         return request_data
 
     @request("GET", "iserver/contract/{conid}/info-and-rules")
-    def contract_info_and_rules(self, conid: int, is_buy: bool = True):
+    def contract_info_and_rules(
+        self, conid: int, is_buy: bool = True
+    ) -> requests.Response:
         """
         Get both contract details and rules for the specified contract identifier.
         For only contract details, use the `contract_details` endpoint.
@@ -262,7 +261,7 @@ class APISession:
         return request_data
 
     @request("GET", "ibcust/marketdata/subscriptions")
-    def market_data_subscriptions(self):
+    def market_data_subscriptions(self) -> requests.Response:
         """
         Get a list of all market data subscriptions. This endpoint does not require a brokerage session.
         """
@@ -271,7 +270,9 @@ class APISession:
     # Market data
 
     @request("GET", "iserver/marketdata/snapshot")
-    def market_data_snapshot(self, conid_list: list[int], fields: list[str]):
+    def market_data_snapshot(
+        self, conid_list: list[int], fields: list[str]
+    ) -> requests.Response:
         """
         Returns a snapshot of market data for a list of conids. The fields parameter contains a list of fields to be returned.
         This endpoint needs to be called at least twice, with the first call initiating the subscription and the second call returning the data.
@@ -285,14 +286,14 @@ class APISession:
         return request_data
 
     @request("GET", "iserver/marketdata/{conid}/unsubscribe")
-    def cancel_market_data_single(self, conid: int):
+    def cancel_market_data_single(self, conid: int) -> requests.Response:
         """
         Unsubscribe from market data for a given conid.
         """
         pass
 
     @request("GET", "iserver/marketdata/unsubscribeall")
-    def cancel_market_data_all(self):
+    def cancel_market_data_all(self) -> requests.Response:
         """
         Cancel all market data subscriptions.
         """
@@ -307,7 +308,7 @@ class APISession:
         exchange: str = None,
         start_time: datetime.datetime = None,
         outside_rth: bool = False,
-    ):
+    ) -> requests.Response:
         """
         Get historical OHLVC data for a given conid.
         """
@@ -335,7 +336,7 @@ class APISession:
     # Scanner
 
     @request("GET", "iserver/scanner/params")
-    def scanner_params(self):
+    def scanner_params(self) -> requests.Response:
         """
         Get a list of supported scanner parameters.
         """
@@ -346,7 +347,7 @@ class APISession:
     # Trades
 
     @request("GET", "iserver/account/trades")
-    def trades(self):
+    def trades(self) -> requests.Response:
         """
         Returns a list of trades for the currently selected account.
         """
@@ -355,7 +356,7 @@ class APISession:
     # PnL
 
     @request("GET", "iserver/account/pnl/partitioned")
-    def partitioned_pnl(self):
+    def partitioned_pnl(self) -> requests.Response:
         """
         Returns the PNl for the currently selected account and its models (if any).
         """
@@ -364,7 +365,7 @@ class APISession:
     # Account & Portfolio
 
     @request("GET", "portfolio/accounts")
-    def portfolio_accounts(self):
+    def portfolio_accounts(self) -> requests.Response:
         """
         In non-tiered account structures, returns a list of accounts for which the user
         can view position and account information. For querying accounts which the user can trade see the brokerage_accounts
@@ -373,7 +374,7 @@ class APISession:
         pass
 
     @request("GET", "portfolio/subaccounts")
-    def portfolio_subaccounts(self):
+    def portfolio_subaccounts(self) -> requests.Response:
         """
         Used in tiered account structures (FA, iBrokers). Returns up to 100 sub-accounts for which the
         user can view position and account-related inforamtion.
@@ -381,7 +382,7 @@ class APISession:
         pass
 
     @request("GET", "portfolio/subaccounts2")
-    def portfolio_subaccounts_paginated(self, page: int = 0):
+    def portfolio_subaccounts_paginated(self, page: int = 0) -> requests.Response:
         """
         Returns a paginated list of accounts for which the user can view position and account-related information.
         Returns 20 accounts per page. If you have less than 100 subaccounts use the portfolio_subaccounts method instead.
@@ -390,14 +391,14 @@ class APISession:
         return request_data
 
     @request("GET", "portfolio/{account_id}/meta")
-    def account_information(self, account_id: str):
+    def account_information(self, account_id: str) -> requests.Response:
         """
         Returns information about the given account id.
         """
         pass
 
     @request("GET", "portfolio/{account_id}/summary")
-    def account_summary(self, account_id: str):
+    def account_summary(self, account_id: str) -> requests.Response:
         """
         Returns the portfolio summary for the given account id including information about margin,
         cash balances and other information related to the account.
@@ -405,7 +406,7 @@ class APISession:
         pass
 
     @request("GET", "portfolio/{account_id}/ledger")
-    def account_ledger(self, account_id: str):
+    def account_ledger(self, account_id: str) -> requests.Response:
         """
         Information regarding settled cash, cash balances, etc. in the account's base currency and any other cash
         balances held in other currencies.
@@ -413,14 +414,14 @@ class APISession:
         pass
 
     @request("GET", "iserver/accounts")
-    def brokerage_accounts(self):
+    def brokerage_accounts(self) -> requests.Response:
         """
         Returns a list of brokerage accounts associated that the user has access to.
         """
         pass
 
     @request("POST", "iserver/switch")
-    def switch_account(self, account_id: str):
+    def switch_account(self, account_id: str) -> requests.Response:
         """
         Switches the active account to the account id provided.
         """
@@ -428,14 +429,16 @@ class APISession:
         return request_data
 
     @request("GET", "portfolio/{account_id}/allocation")
-    def account_allocation(self, account_id: str):
+    def account_allocation(self, account_id: str) -> requests.Response:
         """
         Information regarding the account's portfolio allocation by Asset Class, Industry and Category.
         """
         pass
 
     @request("GET", "portfolio/allocation")
-    def aggregate_account_allocation(self, account_id_list: list[str]):
+    def aggregate_account_allocation(
+        self, account_id_list: list[str]
+    ) -> requests.Response:
         """
         Returns the portfolio allocation for all accounts associated with the user.
         """
@@ -455,7 +458,7 @@ class APISession:
         sort_column: str = None,
         sort_direction: str = None,
         pnl_period: str = None,
-    ):
+    ) -> requests.Response:
         """
         Returns a paginated list of positions for the given account id. Default page size is 30.
         """
@@ -474,21 +477,21 @@ class APISession:
         return request_data
 
     @request("GET", "portfolio/{account_id}/position/{conid}")
-    def position_by_conid(self, account_id: str, conid: int):
+    def position_by_conid(self, account_id: str, conid: int) -> requests.Response:
         """
         Returns the position for the given account id and conid.
         """
         pass
 
     @request("POST", "portfolio/{account_id}/positions/invalidate")
-    def invalidate_portfolio_cache(self, account_id: str):
+    def invalidate_portfolio_cache(self, account_id: str) -> requests.Response:
         """
         Invalidates the backend portfolio cache for the given account id.
         """
         pass
 
     @request("GET", "portfolio/positions/{conid}")
-    def aggregate_position_by_conid(self, conid: int):
+    def aggregate_position_by_conid(self, conid: int) -> requests.Response:
         """
         Returns the aggregate position for the given conid across all accounts associated with the user.
         """
@@ -509,7 +512,9 @@ class GatewaySession(APISession):
         """
         return parse.urljoin(self.__base_url, endpoint)
 
-    def make_api_request(self, method: str, endpoint: str, request_data: APIRequest):
+    def make_api_request(
+        self, method: str, endpoint: str, request_data: APIRequest
+    ) -> requests.Response:
         request_url = self.__generate_request_url(endpoint)
         response = requests.request(
             method,
@@ -522,7 +527,7 @@ class GatewaySession(APISession):
         return response
 
     @request("GET", "sso/validate")
-    def validate_session(self):
+    def validate_session(self) -> requests.Response:
         """
         Validate the current session for the SSO user.
         """
@@ -560,7 +565,7 @@ class OAuthSession(APISession):
         request_data: APIRequest,
         encryption_method: str = "HMAC-SHA256",
         is_lst_request: bool = False,
-    ):
+    ) -> requests.Response:
         # If we don't have a valid live session token, request one, if LST request skip the LST check
         is_valid_lst = self.__is_valid_live_session_token()
         if not is_lst_request and not is_valid_lst:
@@ -573,23 +578,19 @@ class OAuthSession(APISession):
         signature = self.__generate_request_signature(base_string, encryption_method)
         request_headers.update(request_data.extra_headers or {})
         request_headers["oauth_signature"] = signature
-        logging.info(f"Request headers: {request_headers}")
-        try:
-            response = requests.request(
-                method,
-                request_url,
-                headers={
-                    "authorization": generate_authorization_header_string(
-                        request_headers, self.realm
-                    ),
-                },
-                params=request_data.params,
-                json=request_data.body,
-                data=request_data.form_data,
-            )
-            return response
-        except Exception as e:
-            logging.error(f"Error making request: {e}")
+        response = requests.request(
+            method,
+            request_url,
+            headers={
+                "authorization": generate_authorization_header_string(
+                    request_headers, self.realm
+                ),
+            },
+            params=request_data.params,
+            json=request_data.body,
+            data=request_data.form_data,
+        )
+        return response
 
     def __request_live_session_token(self):
         """
@@ -688,7 +689,9 @@ class OAuthSession(APISession):
         return signature
 
     @request("POST", "iserver/auth/ssodh/init")
-    def init_brokerage_session(self, compete: bool = True, publish: bool = True):
+    def init_brokerage_session(
+        self, compete: bool = True, publish: bool = True
+    ) -> requests.Response:
         """
         A brokerage session is required to access protected resources using the API. Protected resources include market
         data requests, position information, account performance. This endpoint needs to be called after requesting
