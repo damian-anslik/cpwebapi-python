@@ -8,7 +8,18 @@ import random
 import base64
 import dataclasses
 import os
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
 
+
+# Function to read and parse a PEM file containing DH parameters
+def read_and_parse_dh_pem_file(filepath: os.PathLike):
+    with open(filepath, 'rb') as file:
+        pem_data = file.read()
+
+    # Load the DH parameters using the cryptography library
+    dh_params = serialization.load_pem_parameters(pem_data, backend=default_backend())
+    return dh_params
 
 @dataclasses.dataclass
 class OAuthConfig:
@@ -16,7 +27,7 @@ class OAuthConfig:
     encryption_key_fp: os.PathLike
     signature_key_fp: os.PathLike
     consumer_key: str
-    dh_prime: str
+    dh_param_fp: os.PathLike
     access_token: str
     access_token_secret: str
 
@@ -93,12 +104,12 @@ def generate_dh_random_bytes() -> str:
     return random_bytes_hex
 
 
-def generate_dh_challenge(dh_prime: str, dh_random: str, dh_generator: int = 2) -> str:
+def generate_dh_challenge(dh_prime: int, dh_random: str, dh_generator: int = 2) -> str:
     """
     Generate the DH challenge using the prime, random and generator values. The result needs to be recorded as a hex value and sent to LST endpoint.
     """
     INT_BASE = 16
-    dh_challenge = pow(dh_generator, int(dh_random, INT_BASE), int(dh_prime, INT_BASE))
+    dh_challenge = pow(dh_generator, int(dh_random, INT_BASE), dh_prime)
     hex_challenge = hex(dh_challenge)[2:]
     return hex_challenge
 
@@ -172,7 +183,7 @@ def to_byte_array(x: int) -> list[int]:
 
 
 def calculate_live_session_token(
-    dh_prime: str, dh_random_value: str, dh_response: str, prepend: str
+    dh_prime: int, dh_random_value: str, dh_response: str, prepend: str
 ) -> str:
     """
     Calculates the live session token using the DH prime, random value, response and prepend.
@@ -183,7 +194,7 @@ def calculate_live_session_token(
     access_token_secret_bytes = get_access_token_secret_bytes(prepend)
     a = int(dh_random_value, INT_BASE)
     B = int(dh_response, INT_BASE)
-    K = pow(B, a, int(dh_prime, INT_BASE))
+    K = pow(B, a, dh_prime)
     hmac = HMAC.new(bytes(to_byte_array(K)), digestmod=SHA1)
     hmac.update(bytes(access_token_secret_bytes))
     return base64.b64encode(hmac.digest()).decode(STRING_ENCODING)
@@ -198,7 +209,8 @@ def validate_live_session_token(
     STRING_ENCODING = "utf-8"
     hmac = HMAC.new(bytes(base64.b64decode(live_session_token)), digestmod=SHA1)
     hmac.update(bytes(consumer_key, STRING_ENCODING))
-    return hmac.hexdigest() == live_session_token_signature
+    calculated_lst_digest = hmac.hexdigest()
+    return calculated_lst_digest == live_session_token_signature
 
 
 def generate_authorization_header_string(request_data: dict, realm: str) -> str:

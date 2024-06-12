@@ -22,6 +22,7 @@ from .oauth_utils import (
     generate_hmac_sha_256_signature,
     validate_live_session_token,
     OAuthConfig,
+    read_and_parse_dh_pem_file,
 )
 
 # Disable insecure request warnings when connecting via Gateway
@@ -552,7 +553,7 @@ class OAuthSession(APISession):
         self.consumer_key = self.__oauth_config.consumer_key
         self.access_token = self.__oauth_config.access_token
         self.access_token_secret = self.__oauth_config.access_token_secret
-        self.dh_prime = self.__oauth_config.dh_prime
+        self.dh_prime = read_and_parse_dh_pem_file(self.__oauth_config.dh_param_fp).parameter_numbers().p
         self.realm = self.__oauth_config.realm
         self.live_session_token = live_session_token
         self.live_session_token_expiration = live_session_token_expiry
